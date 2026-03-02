@@ -87,15 +87,72 @@ function App() {
     setSelectedAddress(address);
     setIsVerifying(true);
 
-    // Simulate AI verification delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Extract postcode from the selected address (last postcode-looking token)
+    const postcodeMatch = address.address.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i);
+    const postcodeToCheck = postcodeMatch ? postcodeMatch[0].toUpperCase().replace(/\s+/g, '') : null;
+
+    let externalVerification = {
+      valid: null,
+      error: null,
+      provider: 'api.postcodes.io',
+    };
+
+    if (postcodeToCheck) {
+      try {
+        const response = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcodeToCheck)}`);
+        const data = await response.json();
+
+        if (data.status === 200 && data.result) {
+          externalVerification = {
+            valid: true,
+            error: null,
+            provider: 'api.postcodes.io',
+            result: data.result,
+          };
+        } else {
+          externalVerification = {
+            valid: false,
+            error: data.error || 'Postcode not found in official database',
+            provider: 'api.postcodes.io',
+          };
+        }
+      } catch (err) {
+        externalVerification = {
+          valid: null,
+          error: 'Network error contacting postcode verification service',
+          provider: 'api.postcodes.io',
+        };
+      }
+    } else {
+      externalVerification = {
+        valid: false,
+        error: 'No valid UK postcode detected in address string',
+        provider: 'client-side',
+      };
+    }
+
+    // Simulate AI verification delay on top of real API call
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     const addressLower = address.address.toLowerCase();
     const isImplausible = IMPLAUSIBLE_PATTERNS.some(pattern => addressLower.includes(pattern));
 
     let score, status, reasons, recommendation;
+    const postcodeInvalid = externalVerification.valid === false;
 
-    if (isImplausible || address.risk === 'critical') {
+    if (postcodeInvalid) {
+      score = Math.floor(Math.random() * 10) + 1; // 1-10
+      status = 'blocked';
+      reasons = [
+        'Postcode could not be validated against official UK postcode database (api.postcodes.io)',
+        externalVerification.error || 'Postcode appears to be invalid or non-existent',
+        'Applicant-provided address may not correspond to a real UK delivery point',
+      ];
+      if (isImplausible || address.risk === 'critical') {
+        reasons.push('Address is also in internal implausible/government address list');
+      }
+      recommendation = 'Block application. Request alternative proof of address or additional documentation.';
+    } else if (isImplausible || address.risk === 'critical') {
       score = Math.floor(Math.random() * 10) + 1; // 1-10
       status = 'blocked';
       reasons = [
@@ -104,6 +161,9 @@ function App() {
         'Address flagged in implausible address database',
         'Zero electoral roll registrations at this address',
       ];
+      if (externalVerification.valid === true) {
+        reasons.push('Postcode exists, but address type is inconsistent with residential onboarding');
+      }
       recommendation = 'Block application. Escalate to compliance team for manual review.';
     } else if (address.type === 'commercial' || address.risk === 'medium') {
       score = Math.floor(Math.random() * 30) + 40; // 40-70
@@ -113,6 +173,9 @@ function App() {
         'Limited residential indicators',
         'Requires proof of address documentation',
       ];
+      if (externalVerification.valid === true) {
+        reasons.push('Postcode verified against official UK postcode database (api.postcodes.io)');
+      }
       recommendation = 'Request enhanced verification: utility bill or bank statement required.';
     } else {
       score = Math.floor(Math.random() * 15) + 85; // 85-100
@@ -123,6 +186,9 @@ function App() {
         'Electoral roll match found',
         'No adverse indicators detected',
       ];
+      if (externalVerification.valid === true) {
+        reasons.unshift('Postcode successfully validated via api.postcodes.io (official UK postcode registry)');
+      }
       recommendation = 'Proceed with onboarding.';
     }
 
@@ -133,6 +199,7 @@ function App() {
       recommendation,
       addressType: address.type,
       timestamp: new Date().toISOString(),
+      externalVerification,
     });
 
     setIsVerifying(false);
