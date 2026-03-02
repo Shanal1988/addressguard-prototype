@@ -63,20 +63,52 @@ function App() {
     setSelectedAddress(null);
     setVerificationResult(null);
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 800));
+    const normalizedPostcode = postcode.toUpperCase().replace(/\s+/g, '').trim();
 
-    const normalizedPostcode = postcode.toUpperCase().replace(/\s+/g, ' ').trim();
-    const foundAddresses = KNOWN_ADDRESSES[normalizedPostcode] || [];
+    try {
+      const response = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(normalizedPostcode)}`);
+      const data = await response.json();
 
-    if (foundAddresses.length === 0) {
-      // Generate some fake addresses for demo
-      setAddresses([
-        { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${normalizedPostcode}`, type: 'residential', risk: 'low' },
-        { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${normalizedPostcode}`, type: 'residential', risk: 'low' },
-      ]);
-    } else {
-      setAddresses(foundAddresses);
+      if (data.status === 200 && data.result) {
+        const result = data.result;
+        const prettyPostcode = result.postcode || normalizedPostcode;
+        const town = result.post_town || result.parish || '';
+        const district = result.admin_district || result.admin_ward || '';
+
+        const addressLine = [
+          town,
+          district,
+          prettyPostcode,
+        ].filter(Boolean).join(', ');
+
+        setAddresses([
+          {
+            address: addressLine || prettyPostcode,
+            type: 'residential',
+            risk: 'low',
+            externalMeta: {
+              latitude: result.latitude,
+              longitude: result.longitude,
+              country: result.country,
+              nhs_ha: result.nhs_ha,
+            },
+          },
+        ]);
+      } else {
+        const fallbackPostcode = postcode.toUpperCase().replace(/\s+/g, ' ').trim();
+        const fallbackAddresses = KNOWN_ADDRESSES[fallbackPostcode] || [
+          { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${fallbackPostcode}`, type: 'residential', risk: 'low' },
+          { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${fallbackPostcode}`, type: 'residential', risk: 'low' },
+        ];
+        setAddresses(fallbackAddresses);
+      }
+    } catch (err) {
+      const fallbackPostcode = postcode.toUpperCase().replace(/\s+/g, ' ').trim();
+      const fallbackAddresses = KNOWN_ADDRESSES[fallbackPostcode] || [
+        { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${fallbackPostcode}`, type: 'residential', risk: 'low' },
+        { address: `${Math.floor(Math.random() * 100) + 1} Sample Street, ${fallbackPostcode}`, type: 'residential', risk: 'low' },
+      ];
+      setAddresses(fallbackAddresses);
     }
 
     setShowAddressSelect(true);
